@@ -14,130 +14,206 @@ public class ReportService : IReportService
         _context = context;
     }
 
-    public async Task<DashboardStatsResponse> GetDashboardStatsAsync()
+    public async Task<DashboardStatsDto> GetDashboardStatsAsync()
     {
-        var now = DateTime.UtcNow;
-        var startOfMonth = new DateTime(now.Year, now.Month, 1);
-
-        var totalVehicles = await _context.Vehicles.CountAsync();
-        var activeVehicles = await _context.Vehicles.CountAsync(v => v.Status == VehicleStatus.Available || v.Status == VehicleStatus.InUse);
-        var vehiclesInMaintenance = await _context.Vehicles.CountAsync(v => v.Status == VehicleStatus.Maintenance);
-        
-        var overdueMaintenanceCount = await _context.MaintenanceRecords
-            .CountAsync(m => m.NextServiceDue.HasValue && m.NextServiceDue.Value < now);
-
-        var monthlyFuelCost = await _context.FuelRecords
-            .Where(f => f.FuelDate >= startOfMonth)
-            .SumAsync(f => f.Cost);
-
-        var monthlyMaintenanceCost = await _context.MaintenanceRecords
-            .Where(m => m.ServiceDate >= startOfMonth)
-            .SumAsync(m => m.Cost);
-
-        var averageVehicleAge = await _context.Vehicles
-            .AverageAsync(v => now.Year - v.Year);
-
-        var vehiclesByStatus = await _context.Vehicles
-            .GroupBy(v => v.Status)
-            .Select(g => new VehicleStatusCount
+        var vehicleStats = await _context.Vehicles
+            .GroupBy(v => 1)
+            .Select(g => new
             {
-                Status = g.Key.ToString(),
-                Count = g.Count()
+                TotalVehicles = g.Count(),
+                AvailableVehicles = g.Count(v => v.Status == VehicleStatus.Available),
+                InUseVehicles = g.Count(v => v.Status == VehicleStatus.InUse),
+                MaintenanceVehicles = g.Count(v => v.Status == VehicleStatus.Maintenance),
+                AverageMileage = g.Average(v => v.Mileage)
             })
-            .ToListAsync();
+            .FirstOrDefaultAsync();
 
-        // Get last 6 months expenses
-        var monthlyExpenses = new List<MonthlyExpense>();
-        for (int i = 5; i >= 0; i--)
-        {
-            var monthStart = startOfMonth.AddMonths(-i);
-            var monthEnd = monthStart.AddMonths(1);
-
-            var fuelCost = await _context.FuelRecords
-                .Where(f => f.FuelDate >= monthStart && f.FuelDate < monthEnd)
-                .SumAsync(f => f.Cost);
-
-            var maintenanceCost = await _context.MaintenanceRecords
-                .Where(m => m.ServiceDate >= monthStart && m.ServiceDate < monthEnd)
-                .SumAsync(m => m.Cost);
-
-            monthlyExpenses.Add(new MonthlyExpense
+        var maintenanceStats = await _context.MaintenanceRecords
+            .Where(m => m.ServiceDate >= DateTime.UtcNow.AddMonths(-12))
+            .GroupBy(m => 1)
+            .Select(g => new
             {
-                Month = monthStart.ToString("MMM yyyy"),
-                FuelCost = fuelCost,
-                MaintenanceCost = maintenanceCost
-            });
-        }
+                TotalMaintenanceRecords = g.Count(),
+                PendingMaintenance = g.Count(m => m.Status == MaintenanceStatus.Pending),
+                InProgressMaintenance = g.Count(m => m.Status == MaintenanceStatus.InProgress),
+                TotalMaintenanceCost = g.Sum(m => m.Cost),
+                AverageMaintenanceCost = g.Average(m => m.Cost)
+            })
+            .FirstOrDefaultAsync();
 
-        return new DashboardStatsResponse
+        var fuelStats = await _context.FuelRecords
+            .Where(f => f.FuelDate >= DateTime.UtcNow.AddMonths(-12))
+            .GroupBy(f => 1)
+            .Select(g => new
+            {
+                TotalFuelRecords = g.Count(),
+                TotalFuelCost = g.Sum(f => f.Cost),
+                TotalFuelAmount = g.Sum(f => f.FuelAmount),
+                AverageFuelPrice = g.Average(f => f.PricePerUnit),
+                AverageFuelEfficiency = g.Where(f => f.FuelEfficiency.HasValue).Average(f => f.FuelEfficiency)
+            })
+            .FirstOrDefaultAsync();
+
+        return new DashboardStatsDto
         {
-            TotalVehicles = totalVehicles,
-            ActiveVehicles = activeVehicles,
-            VehiclesInMaintenance = vehiclesInMaintenance,
-            OverdueMaintenanceCount = overdueMaintenanceCount,
-            MonthlyFuelCost = monthlyFuelCost,
-            MonthlyMaintenanceCost = monthlyMaintenanceCost,
-            AverageVehicleAge = (decimal)averageVehicleAge,
-            VehiclesByStatus = vehiclesByStatus,
-            MonthlyExpenses = monthlyExpenses
+            TotalVehicles = vehicleStats?.TotalVehicles ?? 0,
+            AvailableVehicles = vehicleStats?.AvailableVehicles ?? 0,
+            InUseVehicles = vehicleStats?.InUseVehicles ?? 0,
+            MaintenanceVehicles = vehicleStats?.MaintenanceVehicles ?? 0,
+            AverageMileage = vehicleStats?.AverageMileage ?? 0,
+            TotalMaintenanceRecords = maintenanceStats?.TotalMaintenanceRecords ?? 0,
+            PendingMaintenance = maintenanceStats?.PendingMaintenance ?? 0,
+            InProgressMaintenance = maintenanceStats?.InProgressMaintenance ?? 0,
+            TotalMaintenanceCost = maintenanceStats?.TotalMaintenanceCost ?? 0,
+            AverageMaintenanceCost = maintenanceStats?.AverageMaintenanceCost ?? 0,
+            TotalFuelRecords = fuelStats?.TotalFuelRecords ?? 0,
+            TotalFuelCost = fuelStats?.TotalFuelCost ?? 0,
+            TotalFuelAmount = fuelStats?.TotalFuelAmount ?? 0,
+            AverageFuelPrice = fuelStats?.AverageFuelPrice ?? 0,
+            AverageFuelEfficiency = fuelStats?.AverageFuelEfficiency ?? 0
         };
     }
 
-    public async Task<byte[]> GenerateVehicleReportAsync(ReportRequest request)
+    public async Task<List<MonthlyCostTrendDto>> GetMonthlyCostTrendsAsync(int months = 12)
     {
-        var vehicles = await _context.Vehicles
-            .Include(v => v.Owner)
-            .Where(v => request.VehicleIds == null || request.VehicleIds.Contains(v.Id))
+        var startDate = DateTime.UtcNow.AddMonths(-months);
+
+        var maintenanceCosts = await _context.MaintenanceRecords
+            .Where(m => m.ServiceDate >= startDate)
+            .GroupBy(m => new { m.ServiceDate.Year, m.ServiceDate.Month })
+            .Select(g => new
+            {
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                MaintenanceCost = g.Sum(m => m.Cost)
+            })
             .ToListAsync();
 
-        // For now, return a simple CSV format
-        var csv = "VIN,Make,Model,Year,Status,Owner,Mileage,Created\n";
-        foreach (var vehicle in vehicles)
-        {
-            var owner = vehicle.Owner != null ? $"{vehicle.Owner.FirstName} {vehicle.Owner.LastName}" : "";
-            csv += $"{vehicle.VIN},{vehicle.Make},{vehicle.Model},{vehicle.Year},{vehicle.Status},{owner},{vehicle.Mileage},{vehicle.CreatedAt:yyyy-MM-dd}\n";
-        }
-
-        return System.Text.Encoding.UTF8.GetBytes(csv);
-    }
-
-    public async Task<byte[]> GenerateMaintenanceReportAsync(ReportRequest request)
-    {
-        var records = await _context.MaintenanceRecords
-            .Include(m => m.Vehicle)
-            .Include(m => m.PerformedBy)
-            .Where(m => m.ServiceDate >= request.StartDate && m.ServiceDate <= request.EndDate)
-            .Where(m => request.VehicleIds == null || request.VehicleIds.Contains(m.VehicleId))
+        var fuelCosts = await _context.FuelRecords
+            .Where(f => f.FuelDate >= startDate)
+            .GroupBy(f => new { f.FuelDate.Year, f.FuelDate.Month })
+            .Select(g => new
+            {
+                Year = g.Key.Year,
+                Month = g.Key.Month,
+                FuelCost = g.Sum(f => f.Cost)
+            })
             .ToListAsync();
 
-        var csv = "Vehicle,Type,Description,Cost,ServiceProvider,ServiceDate,NextDue,Status,PerformedBy\n";
-        foreach (var record in records)
+        var allMonths = new List<MonthlyCostTrendDto>();
+        for (int i = 0; i < months; i++)
         {
-            var vehicle = $"{record.Vehicle?.Make} {record.Vehicle?.Model} ({record.Vehicle?.Year})";
-            var performedBy = record.PerformedBy != null ? $"{record.PerformedBy.FirstName} {record.PerformedBy.LastName}" : "";
-            csv += $"{vehicle},{record.Type},{record.Description},{record.Cost},{record.ServiceProvider},{record.ServiceDate:yyyy-MM-dd},{record.NextServiceDue?.ToString("yyyy-MM-dd")},{record.Status},{performedBy}\n";
+            var date = DateTime.UtcNow.AddMonths(-i);
+            var year = date.Year;
+            var month = date.Month;
+
+            var maintenanceCost = maintenanceCosts.FirstOrDefault(m => m.Year == year && m.Month == month)?.MaintenanceCost ?? 0;
+            var fuelCost = fuelCosts.FirstOrDefault(f => f.Year == year && f.Month == month)?.FuelCost ?? 0;
+
+            allMonths.Add(new MonthlyCostTrendDto
+            {
+                Year = year,
+                Month = month,
+                MonthYear = $"{date:MMM yyyy}",
+                MaintenanceCost = maintenanceCost,
+                FuelCost = fuelCost,
+                TotalCost = maintenanceCost + fuelCost
+            });
         }
 
-        return System.Text.Encoding.UTF8.GetBytes(csv);
+        return allMonths.OrderBy(m => m.Year).ThenBy(m => m.Month).ToList();
     }
 
-    public async Task<byte[]> GenerateFuelReportAsync(ReportRequest request)
+    public async Task<List<VehicleUtilizationDto>> GetVehicleUtilizationAsync()
     {
-        var records = await _context.FuelRecords
-            .Include(f => f.Vehicle)
-            .Include(f => f.RecordedBy)
-            .Where(f => f.FuelDate >= request.StartDate && f.FuelDate <= request.EndDate)
-            .Where(f => request.VehicleIds == null || request.VehicleIds.Contains(f.VehicleId))
+        var utilization = await _context.Vehicles
+            .GroupBy(v => v.Status)
+            .Select(g => new VehicleUtilizationDto
+            {
+                Status = g.Key.ToString(),
+                Count = g.Count(),
+                Percentage = (decimal)g.Count() * 100 / _context.Vehicles.Count()
+            })
             .ToListAsync();
 
-        var csv = "Vehicle,FuelAmount,Cost,PricePerUnit,OdometerReading,FuelEfficiency,FuelStation,FuelDate,RecordedBy\n";
-        foreach (var record in records)
+        return utilization;
+    }
+
+    public async Task<List<TopMaintenanceVehicleDto>> GetTopMaintenanceVehiclesAsync(int topCount = 10)
+    {
+        var topVehicles = await _context.MaintenanceRecords
+            .Where(m => m.ServiceDate >= DateTime.UtcNow.AddMonths(-12))
+            .GroupBy(m => m.VehicleId)
+            .Select(g => new
+            {
+                VehicleId = g.Key,
+                MaintenanceCount = g.Count(),
+                TotalCost = g.Sum(m => m.Cost)
+            })
+            .OrderByDescending(x => x.TotalCost)
+            .Take(topCount)
+            .ToListAsync();
+
+        var result = new List<TopMaintenanceVehicleDto>();
+        foreach (var item in topVehicles)
         {
-            var vehicle = $"{record.Vehicle?.Make} {record.Vehicle?.Model} ({record.Vehicle?.Year})";
-            var recordedBy = record.RecordedBy != null ? $"{record.RecordedBy.FirstName} {record.RecordedBy.LastName}" : "";
-            csv += $"{vehicle},{record.FuelAmount},{record.Cost},{record.PricePerUnit},{record.OdometerReading},{record.FuelEfficiency},{record.FuelStation},{record.FuelDate:yyyy-MM-dd},{recordedBy}\n";
+            var vehicle = await _context.Vehicles.FindAsync(item.VehicleId);
+            if (vehicle != null)
+            {
+                result.Add(new TopMaintenanceVehicleDto
+                {
+                    VehicleId = item.VehicleId,
+                    VehicleInfo = $"{vehicle.Make} {vehicle.Model} ({vehicle.LicensePlate})",
+                    MaintenanceCount = item.MaintenanceCount,
+                    TotalCost = item.TotalCost
+                });
+            }
         }
 
-        return System.Text.Encoding.UTF8.GetBytes(csv);
+        return result;
     }
+
+    public async Task<List<FuelEfficiencyReportDto>> GetFuelEfficiencyReportAsync()
+    {
+        var fuelEfficiency = await _context.FuelRecords
+            .Where(f => f.FuelEfficiency.HasValue && f.FuelDate >= DateTime.UtcNow.AddMonths(-12))
+            .GroupBy(f => f.VehicleId)
+            .Select(g => new
+            {
+                VehicleId = g.Key,
+                AverageEfficiency = g.Average(f => f.FuelEfficiency),
+                TotalFuelCost = g.Sum(f => f.Cost),
+                TotalFuelAmount = g.Sum(f => f.FuelAmount)
+            })
+            .OrderByDescending(x => x.AverageEfficiency)
+            .ToListAsync();
+
+        var result = new List<FuelEfficiencyReportDto>();
+        foreach (var item in fuelEfficiency)
+        {
+            var vehicle = await _context.Vehicles.FindAsync(item.VehicleId);
+            if (vehicle != null)
+            {
+                result.Add(new FuelEfficiencyReportDto
+                {
+                    VehicleId = item.VehicleId,
+                    VehicleInfo = $"{vehicle.Make} {vehicle.Model} ({vehicle.LicensePlate})",
+                    AverageEfficiency = item.AverageEfficiency ?? 0,
+                    TotalFuelCost = item.TotalFuelCost,
+                    TotalFuelAmount = item.TotalFuelAmount
+                });
+            }
+        }
+
+        return result;
+    }
+}
+
+public interface IReportService
+{
+    Task<DashboardStatsDto> GetDashboardStatsAsync();
+    Task<List<MonthlyCostTrendDto>> GetMonthlyCostTrendsAsync(int months = 12);
+    Task<List<VehicleUtilizationDto>> GetVehicleUtilizationAsync();
+    Task<List<TopMaintenanceVehicleDto>> GetTopMaintenanceVehiclesAsync(int topCount = 10);
+    Task<List<FuelEfficiencyReportDto>> GetFuelEfficiencyReportAsync();
 }

@@ -2,7 +2,7 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import 'react-native-reanimated/lib/reanimated2/js-reanimated';
+// Reanimated import removed to fix build issues
 import { PaperProvider } from 'react-native-paper';
 import { AuthProvider } from '../contexts/AuthContext';
 

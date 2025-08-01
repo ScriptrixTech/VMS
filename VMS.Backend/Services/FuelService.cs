@@ -10,179 +10,228 @@ namespace VMS.Backend.Services;
 public class FuelService : IFuelService
 {
     private readonly VMSDbContext _context;
-    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public FuelService(VMSDbContext context, IHttpContextAccessor httpContextAccessor)
+    public FuelService(VMSDbContext context)
     {
         _context = context;
-        _httpContextAccessor = httpContextAccessor;
     }
 
-    public async Task<List<FuelRecordResponse>> GetFuelRecordsAsync(int vehicleId)
+    public async Task<FuelRecordResponseDto> CreateFuelRecordAsync(CreateFuelRecordDto createDto, ClaimsPrincipal user)
     {
-        var records = await _context.FuelRecords
-            .Include(f => f.Vehicle)
-            .Include(f => f.RecordedBy)
-            .Where(f => f.VehicleId == vehicleId)
-            .OrderByDescending(f => f.FuelDate)
-            .ToListAsync();
+        var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        return records.Select(MapToResponse).ToList();
-    }
-
-    public async Task<FuelRecordResponse> CreateFuelRecordAsync(FuelRecordRequest request)
-    {
-        var userId = _httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        // Calculate fuel efficiency if previous record exists
+        // Calculate fuel efficiency if we have previous data
+        decimal? fuelEfficiency = null;
         var previousRecord = await _context.FuelRecords
-            .Where(f => f.VehicleId == request.VehicleId && f.OdometerReading < request.OdometerReading)
-            .OrderByDescending(f => f.OdometerReading)
+            .Where(f => f.VehicleId == createDto.VehicleId && f.FuelDate < createDto.FuelDate)
+            .OrderByDescending(f => f.FuelDate)
             .FirstOrDefaultAsync();
 
-        decimal? fuelEfficiency = null;
-        if (previousRecord != null)
+        if (previousRecord != null && previousRecord.Mileage < createDto.Mileage)
         {
-            var distance = request.OdometerReading - previousRecord.OdometerReading;
-            if (distance > 0 && request.FuelAmount > 0)
-            {
-                fuelEfficiency = distance / request.FuelAmount; // MPG or KM/L
-            }
+            var distanceTraveled = createDto.Mileage - previousRecord.Mileage;
+            fuelEfficiency = distanceTraveled / createDto.FuelAmount;
         }
 
-        var record = new FuelRecord
+        var fuelRecord = new FuelRecord
         {
-            VehicleId = request.VehicleId,
-            FuelAmount = request.FuelAmount,
-            Cost = request.Cost,
-            PricePerUnit = request.PricePerUnit,
-            OdometerReading = request.OdometerReading,
+            VehicleId = createDto.VehicleId,
+            FuelAmount = createDto.FuelAmount,
+            Cost = createDto.Cost,
+            PricePerUnit = createDto.PricePerUnit,
+            Mileage = createDto.Mileage,
             FuelEfficiency = fuelEfficiency,
-            FuelStation = request.FuelStation,
-            FuelDate = request.FuelDate,
-            ReceiptImagePath = request.ReceiptImagePath,
+            FuelDate = createDto.FuelDate,
+            Location = createDto.Location,
             RecordedById = userId
         };
 
-        _context.FuelRecords.Add(record);
-
-        // Update vehicle mileage
-        var vehicle = await _context.Vehicles.FindAsync(request.VehicleId);
-        if (vehicle != null && request.OdometerReading > vehicle.Mileage)
-        {
-            vehicle.Mileage = request.OdometerReading;
-            vehicle.UpdatedAt = DateTime.UtcNow;
-        }
-
+        _context.FuelRecords.Add(fuelRecord);
         await _context.SaveChangesAsync();
 
-        return await GetFuelRecordResponseAsync(record.Id);
+        return await GetFuelRecordResponseDto(fuelRecord);
     }
 
-    public async Task<FuelRecordResponse> UpdateFuelRecordAsync(int id, FuelRecordRequest request)
-    {
-        var record = await _context.FuelRecords.FindAsync(id);
-        if (record == null)
-        {
-            throw new NotFoundException("Fuel record not found");
-        }
-
-        record.FuelAmount = request.FuelAmount;
-        record.Cost = request.Cost;
-        record.PricePerUnit = request.PricePerUnit;
-        record.OdometerReading = request.OdometerReading;
-        record.FuelStation = request.FuelStation;
-        record.FuelDate = request.FuelDate;
-        record.ReceiptImagePath = request.ReceiptImagePath;
-        record.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return await GetFuelRecordResponseAsync(id);
-    }
-
-    public async Task<bool> DeleteFuelRecordAsync(int id)
-    {
-        var record = await _context.FuelRecords.FindAsync(id);
-        if (record == null)
-        {
-            throw new NotFoundException("Fuel record not found");
-        }
-
-        _context.FuelRecords.Remove(record);
-        await _context.SaveChangesAsync();
-
-        return true;
-    }
-
-    public async Task<FuelEfficiencyReport> GetFuelEfficiencyReportAsync(int vehicleId, DateTime startDate, DateTime endDate)
-    {
-        var records = await _context.FuelRecords
-            .Include(f => f.Vehicle)
-            .Where(f => f.VehicleId == vehicleId && f.FuelDate >= startDate && f.FuelDate <= endDate)
-            .OrderBy(f => f.FuelDate)
-            .ToListAsync();
-
-        if (!records.Any())
-        {
-            var vehicle = await _context.Vehicles.FindAsync(vehicleId);
-            return new FuelEfficiencyReport
-            {
-                VehicleId = vehicleId,
-                VehicleInfo = vehicle != null ? $"{vehicle.Make} {vehicle.Model} ({vehicle.Year})" : "Unknown Vehicle"
-            };
-        }
-
-        var totalFuel = records.Sum(r => r.FuelAmount);
-        var totalCost = records.Sum(r => r.Cost);
-        var totalDistance = records.Max(r => r.OdometerReading) - records.Min(r => r.OdometerReading);
-        var averageEfficiency = totalDistance > 0 && totalFuel > 0 ? totalDistance / totalFuel : 0;
-
-        return new FuelEfficiencyReport
-        {
-            VehicleId = vehicleId,
-            VehicleInfo = $"{records.First().Vehicle?.Make} {records.First().Vehicle?.Model} ({records.First().Vehicle?.Year})",
-            AverageEfficiency = averageEfficiency,
-            TotalFuelConsumed = totalFuel,
-            TotalCost = totalCost,
-            TotalDistance = totalDistance,
-            Records = records.Select(MapToResponse).ToList()
-        };
-    }
-
-    private async Task<FuelRecordResponse> GetFuelRecordResponseAsync(int id)
+    public async Task<FuelRecordResponseDto?> GetFuelRecordByIdAsync(Guid id)
     {
         var record = await _context.FuelRecords
             .Include(f => f.Vehicle)
             .Include(f => f.RecordedBy)
             .FirstOrDefaultAsync(f => f.Id == id);
 
-        if (record == null)
-        {
-            throw new NotFoundException("Fuel record not found");
-        }
-
-        return MapToResponse(record);
+        return record == null ? null : await GetFuelRecordResponseDto(record);
     }
 
-    private static FuelRecordResponse MapToResponse(FuelRecord record)
+    public async Task<PagedResult<FuelRecordResponseDto>> GetFuelRecordsAsync(
+        int pageNumber, int pageSize, Guid? vehicleId, DateTime? fromDate, DateTime? toDate)
     {
-        return new FuelRecordResponse
+        var query = _context.FuelRecords
+            .Include(f => f.Vehicle)
+            .Include(f => f.RecordedBy)
+            .AsQueryable();
+
+        if (vehicleId.HasValue)
+        {
+            query = query.Where(f => f.VehicleId == vehicleId.Value);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(f => f.FuelDate >= fromDate.Value);
+        }
+
+        if (toDate.HasValue)
+        {
+            query = query.Where(f => f.FuelDate <= toDate.Value);
+        }
+
+        var totalCount = await query.CountAsync();
+        var records = await query
+            .OrderByDescending(f => f.FuelDate)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        var recordDtos = new List<FuelRecordResponseDto>();
+        foreach (var record in records)
+        {
+            recordDtos.Add(await GetFuelRecordResponseDto(record));
+        }
+
+        return new PagedResult<FuelRecordResponseDto>
+        {
+            Items = recordDtos,
+            TotalCount = totalCount,
+            PageNumber = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<FuelRecordResponseDto?> UpdateFuelRecordAsync(Guid id, UpdateFuelRecordDto updateDto)
+    {
+        var record = await _context.FuelRecords.FindAsync(id);
+        if (record == null) return null;
+
+        // Recalculate fuel efficiency if mileage or fuel amount changed
+        if (record.Mileage != updateDto.Mileage || record.FuelAmount != updateDto.FuelAmount)
+        {
+            var previousRecord = await _context.FuelRecords
+                .Where(f => f.VehicleId == record.VehicleId && f.FuelDate < record.FuelDate && f.Id != id)
+                .OrderByDescending(f => f.FuelDate)
+                .FirstOrDefaultAsync();
+
+            if (previousRecord != null && previousRecord.Mileage < updateDto.Mileage)
+            {
+                var distanceTraveled = updateDto.Mileage - previousRecord.Mileage;
+                record.FuelEfficiency = distanceTraveled / updateDto.FuelAmount;
+            }
+            else
+            {
+                record.FuelEfficiency = null;
+            }
+        }
+
+        record.FuelAmount = updateDto.FuelAmount;
+        record.Cost = updateDto.Cost;
+        record.PricePerUnit = updateDto.PricePerUnit;
+        record.Mileage = updateDto.Mileage;
+        record.FuelDate = updateDto.FuelDate;
+        record.Location = updateDto.Location;
+
+        await _context.SaveChangesAsync();
+        return await GetFuelRecordResponseDto(record);
+    }
+
+    public async Task<bool> DeleteFuelRecordAsync(Guid id)
+    {
+        var record = await _context.FuelRecords.FindAsync(id);
+        if (record == null) return false;
+
+        _context.FuelRecords.Remove(record);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<FuelAnalyticsDto> GetFuelAnalyticsAsync(Guid? vehicleId, DateTime? fromDate, DateTime? toDate)
+    {
+        var query = _context.FuelRecords.AsQueryable();
+
+        if (vehicleId.HasValue)
+        {
+            query = query.Where(f => f.VehicleId == vehicleId.Value);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(f => f.FuelDate >= fromDate.Value);
+        }
+
+        if (toDate.HasValue)
+        {
+            query = query.Where(f => f.FuelDate <= toDate.Value);
+        }
+
+        var records = await query.ToListAsync();
+
+        if (!records.Any())
+        {
+            return new FuelAnalyticsDto
+            {
+                TotalCost = 0,
+                TotalFuelAmount = 0,
+                AveragePricePerUnit = 0,
+                AverageFuelEfficiency = 0,
+                TotalRecords = 0
+            };
+        }
+
+        return new FuelAnalyticsDto
+        {
+            TotalCost = records.Sum(f => f.Cost),
+            TotalFuelAmount = records.Sum(f => f.FuelAmount),
+            AveragePricePerUnit = records.Average(f => f.PricePerUnit),
+            AverageFuelEfficiency = records.Where(f => f.FuelEfficiency.HasValue).Average(f => f.FuelEfficiency) ?? 0,
+            TotalRecords = records.Count
+        };
+    }
+
+    private async Task<FuelRecordResponseDto> GetFuelRecordResponseDto(FuelRecord record)
+    {
+        if (record.Vehicle == null)
+        {
+            record.Vehicle = await _context.Vehicles.FindAsync(record.VehicleId);
+        }
+
+        if (record.RecordedBy == null && record.RecordedById != null)
+        {
+            record.RecordedBy = await _context.Users.FindAsync(record.RecordedById);
+        }
+
+        return new FuelRecordResponseDto
         {
             Id = record.Id,
             VehicleId = record.VehicleId,
-            VehicleInfo = $"{record.Vehicle?.Make} {record.Vehicle?.Model} ({record.Vehicle?.Year})",
+            VehicleInfo = record.Vehicle != null ? $"{record.Vehicle.Make} {record.Vehicle.Model} ({record.Vehicle.LicensePlate})" : "Unknown Vehicle",
             FuelAmount = record.FuelAmount,
             Cost = record.Cost,
             PricePerUnit = record.PricePerUnit,
-            OdometerReading = record.OdometerReading,
+            Mileage = record.Mileage,
             FuelEfficiency = record.FuelEfficiency,
-            FuelStation = record.FuelStation,
             FuelDate = record.FuelDate,
-            ReceiptImagePath = record.ReceiptImagePath,
+            Location = record.Location,
             RecordedById = record.RecordedById,
             RecordedByName = record.RecordedBy != null ? $"{record.RecordedBy.FirstName} {record.RecordedBy.LastName}" : null,
             CreatedAt = record.CreatedAt
         };
     }
+}
+
+public interface IFuelService
+{
+    Task<FuelRecordResponseDto> CreateFuelRecordAsync(CreateFuelRecordDto createDto, ClaimsPrincipal user);
+    Task<FuelRecordResponseDto?> GetFuelRecordByIdAsync(Guid id);
+    Task<PagedResult<FuelRecordResponseDto>> GetFuelRecordsAsync(int pageNumber, int pageSize, Guid? vehicleId, DateTime? fromDate, DateTime? toDate);
+    Task<FuelRecordResponseDto?> UpdateFuelRecordAsync(Guid id, UpdateFuelRecordDto updateDto);
+    Task<bool> DeleteFuelRecordAsync(Guid id);
+    Task<FuelAnalyticsDto> GetFuelAnalyticsAsync(Guid? vehicleId, DateTime? fromDate, DateTime? toDate);
 }

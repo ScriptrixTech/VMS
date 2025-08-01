@@ -10,155 +10,194 @@ namespace VMS.Backend.Services;
 public class MaintenanceService : IMaintenanceService
 {
     private readonly VMSDbContext _context;
-    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public MaintenanceService(VMSDbContext context, IHttpContextAccessor httpContextAccessor)
+    public MaintenanceService(VMSDbContext context)
     {
         _context = context;
-        _httpContextAccessor = httpContextAccessor;
     }
 
-    public async Task<List<MaintenanceRecordResponse>> GetMaintenanceRecordsAsync(int vehicleId)
+    public async Task<MaintenanceRecordResponseDto> CreateMaintenanceRecordAsync(CreateMaintenanceRecordDto createDto, ClaimsPrincipal user)
     {
-        var records = await _context.MaintenanceRecords
-            .Include(m => m.Vehicle)
-            .Include(m => m.PerformedBy)
-            .Where(m => m.VehicleId == vehicleId)
-            .OrderByDescending(m => m.ServiceDate)
-            .ToListAsync();
+        var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-        return records.Select(MapToResponse).ToList();
-    }
-
-    public async Task<MaintenanceRecordResponse> CreateMaintenanceRecordAsync(MaintenanceRecordRequest request)
-    {
-        var userId = _httpContextAccessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-        var record = new MaintenanceRecord
+        var maintenanceRecord = new MaintenanceRecord
         {
-            VehicleId = request.VehicleId,
-            Type = request.Type,
-            Description = request.Description,
-            Cost = request.Cost,
-            ServiceProvider = request.ServiceProvider,
-            ServiceDate = request.ServiceDate,
-            NextServiceDue = request.NextServiceDue,
-            Parts = request.Parts,
-            Status = request.Status,
-            ReceiptImagePath = request.ReceiptImagePath,
-            PerformedById = userId
+            VehicleId = createDto.VehicleId,
+            Title = createDto.Title,
+            Description = createDto.Description,
+            ServiceType = createDto.ServiceType,
+            Cost = createDto.Cost,
+            ServiceDate = createDto.ServiceDate,
+            NextServiceDate = createDto.NextServiceDate,
+            Status = createDto.Status,
+            PerformedById = userId,
+            ServiceProvider = createDto.ServiceProvider,
+            Mileage = createDto.Mileage
         };
 
-        _context.MaintenanceRecords.Add(record);
+        _context.MaintenanceRecords.Add(maintenanceRecord);
         await _context.SaveChangesAsync();
 
-        // Update vehicle mileage and status if needed
-        var vehicle = await _context.Vehicles.FindAsync(request.VehicleId);
-        if (vehicle != null && request.Status == MaintenanceStatus.InProgress)
-        {
-            vehicle.Status = VehicleStatus.Maintenance;
-            await _context.SaveChangesAsync();
-        }
-
-        return await GetMaintenanceRecordResponseAsync(record.Id);
+        return await GetMaintenanceRecordResponseDto(maintenanceRecord);
     }
 
-    public async Task<MaintenanceRecordResponse> UpdateMaintenanceRecordAsync(int id, MaintenanceRecordRequest request)
-    {
-        var record = await _context.MaintenanceRecords.FindAsync(id);
-        if (record == null)
-        {
-            throw new NotFoundException("Maintenance record not found");
-        }
-
-        record.Type = request.Type;
-        record.Description = request.Description;
-        record.Cost = request.Cost;
-        record.ServiceProvider = request.ServiceProvider;
-        record.ServiceDate = request.ServiceDate;
-        record.NextServiceDue = request.NextServiceDue;
-        record.Parts = request.Parts;
-        record.Status = request.Status;
-        record.ReceiptImagePath = request.ReceiptImagePath;
-        record.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return await GetMaintenanceRecordResponseAsync(id);
-    }
-
-    public async Task<bool> DeleteMaintenanceRecordAsync(int id)
-    {
-        var record = await _context.MaintenanceRecords.FindAsync(id);
-        if (record == null)
-        {
-            throw new NotFoundException("Maintenance record not found");
-        }
-
-        _context.MaintenanceRecords.Remove(record);
-        await _context.SaveChangesAsync();
-
-        return true;
-    }
-
-    public async Task<List<MaintenanceRecordResponse>> GetUpcomingMaintenanceAsync()
-    {
-        var upcoming = await _context.MaintenanceRecords
-            .Include(m => m.Vehicle)
-            .Include(m => m.PerformedBy)
-            .Where(m => m.NextServiceDue.HasValue && m.NextServiceDue.Value <= DateTime.UtcNow.AddDays(30))
-            .OrderBy(m => m.NextServiceDue)
-            .ToListAsync();
-
-        return upcoming.Select(MapToResponse).ToList();
-    }
-
-    public async Task<List<MaintenanceRecordResponse>> GetOverdueMaintenanceAsync()
-    {
-        var overdue = await _context.MaintenanceRecords
-            .Include(m => m.Vehicle)
-            .Include(m => m.PerformedBy)
-            .Where(m => m.NextServiceDue.HasValue && m.NextServiceDue.Value < DateTime.UtcNow)
-            .OrderBy(m => m.NextServiceDue)
-            .ToListAsync();
-
-        return overdue.Select(MapToResponse).ToList();
-    }
-
-    private async Task<MaintenanceRecordResponse> GetMaintenanceRecordResponseAsync(int id)
+    public async Task<MaintenanceRecordResponseDto?> GetMaintenanceRecordByIdAsync(Guid id)
     {
         var record = await _context.MaintenanceRecords
             .Include(m => m.Vehicle)
             .Include(m => m.PerformedBy)
             .FirstOrDefaultAsync(m => m.Id == id);
 
-        if (record == null)
-        {
-            throw new NotFoundException("Maintenance record not found");
-        }
-
-        return MapToResponse(record);
+        return record == null ? null : await GetMaintenanceRecordResponseDto(record);
     }
 
-    private static MaintenanceRecordResponse MapToResponse(MaintenanceRecord record)
+    public async Task<PagedResult<MaintenanceRecordResponseDto>> GetMaintenanceRecordsAsync(
+        int pageNumber, int pageSize, Guid? vehicleId, string? serviceType, MaintenanceStatus? status)
     {
-        return new MaintenanceRecordResponse
+        var query = _context.MaintenanceRecords
+            .Include(m => m.Vehicle)
+            .Include(m => m.PerformedBy)
+            .AsQueryable();
+
+        if (vehicleId.HasValue)
+        {
+            query = query.Where(m => m.VehicleId == vehicleId.Value);
+        }
+
+        if (!string.IsNullOrEmpty(serviceType))
+        {
+            query = query.Where(m => m.ServiceType == serviceType);
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(m => m.Status == status.Value);
+        }
+
+        var totalCount = await query.CountAsync();
+        var records = await query
+            .OrderByDescending(m => m.ServiceDate)
+            .Skip((pageNumber - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        var recordDtos = new List<MaintenanceRecordResponseDto>();
+        foreach (var record in records)
+        {
+            recordDtos.Add(await GetMaintenanceRecordResponseDto(record));
+        }
+
+        return new PagedResult<MaintenanceRecordResponseDto>
+        {
+            Items = recordDtos,
+            TotalCount = totalCount,
+            PageNumber = pageNumber,
+            PageSize = pageSize
+        };
+    }
+
+    public async Task<MaintenanceRecordResponseDto?> UpdateMaintenanceRecordAsync(Guid id, UpdateMaintenanceRecordDto updateDto)
+    {
+        var record = await _context.MaintenanceRecords.FindAsync(id);
+        if (record == null) return null;
+
+        record.Title = updateDto.Title;
+        record.Description = updateDto.Description;
+        record.ServiceType = updateDto.ServiceType;
+        record.Cost = updateDto.Cost;
+        record.ServiceDate = updateDto.ServiceDate;
+        record.NextServiceDate = updateDto.NextServiceDate;
+        record.Status = updateDto.Status;
+        record.ServiceProvider = updateDto.ServiceProvider;
+        record.Mileage = updateDto.Mileage;
+        record.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return await GetMaintenanceRecordResponseDto(record);
+    }
+
+    public async Task<bool> DeleteMaintenanceRecordAsync(Guid id)
+    {
+        var record = await _context.MaintenanceRecords.FindAsync(id);
+        if (record == null) return false;
+
+        _context.MaintenanceRecords.Remove(record);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<MaintenanceRecordResponseDto>> GetOverdueMaintenanceAsync()
+    {
+        var overdueRecords = await _context.MaintenanceRecords
+            .Include(m => m.Vehicle)
+            .Include(m => m.PerformedBy)
+            .Where(m => m.NextServiceDate.HasValue && 
+                       m.NextServiceDate.Value < DateTime.UtcNow && 
+                       m.Status != MaintenanceStatus.Completed)
+            .OrderBy(m => m.NextServiceDate)
+            .ToListAsync();
+
+        var recordDtos = new List<MaintenanceRecordResponseDto>();
+        foreach (var record in overdueRecords)
+        {
+            recordDtos.Add(await GetMaintenanceRecordResponseDto(record));
+        }
+
+        return recordDtos;
+    }
+
+    public async Task<List<MaintenanceRecordResponseDto>> GetUpcomingMaintenanceAsync(int days = 30)
+    {
+        var upcomingDate = DateTime.UtcNow.AddDays(days);
+        var upcomingRecords = await _context.MaintenanceRecords
+            .Include(m => m.Vehicle)
+            .Include(m => m.PerformedBy)
+            .Where(m => m.NextServiceDate.HasValue && 
+                       m.NextServiceDate.Value >= DateTime.UtcNow && 
+                       m.NextServiceDate.Value <= upcomingDate &&
+                       m.Status != MaintenanceStatus.Completed)
+            .OrderBy(m => m.NextServiceDate)
+            .ToListAsync();
+
+        var recordDtos = new List<MaintenanceRecordResponseDto>();
+        foreach (var record in upcomingRecords)
+        {
+            recordDtos.Add(await GetMaintenanceRecordResponseDto(record));
+        }
+
+        return recordDtos;
+    }
+
+    private async Task<MaintenanceRecordResponseDto> GetMaintenanceRecordResponseDto(MaintenanceRecord record)
+    {
+        if (record.Vehicle == null)
+        {
+            record.Vehicle = await _context.Vehicles.FindAsync(record.VehicleId);
+        }
+
+        if (record.PerformedBy == null && record.PerformedById != null)
+        {
+            record.PerformedBy = await _context.Users.FindAsync(record.PerformedById);
+        }
+
+        return new MaintenanceRecordResponseDto
         {
             Id = record.Id,
             VehicleId = record.VehicleId,
-            VehicleInfo = $"{record.Vehicle?.Make} {record.Vehicle?.Model} ({record.Vehicle?.Year})",
-            Type = record.Type,
+            VehicleInfo = record.Vehicle != null ? $"{record.Vehicle.Make} {record.Vehicle.Model} ({record.Vehicle.LicensePlate})" : "Unknown Vehicle",
+            Title = record.Title,
             Description = record.Description,
+            ServiceType = record.ServiceType,
             Cost = record.Cost,
-            ServiceProvider = record.ServiceProvider,
             ServiceDate = record.ServiceDate,
-            NextServiceDue = record.NextServiceDue,
-            Parts = record.Parts,
+            NextServiceDate = record.NextServiceDate,
             Status = record.Status,
-            ReceiptImagePath = record.ReceiptImagePath,
             PerformedById = record.PerformedById,
             PerformedByName = record.PerformedBy != null ? $"{record.PerformedBy.FirstName} {record.PerformedBy.LastName}" : null,
-            CreatedAt = record.CreatedAt
+            ServiceProvider = record.ServiceProvider,
+            Mileage = record.Mileage,
+            CreatedAt = record.CreatedAt,
+            UpdatedAt = record.UpdatedAt
         };
     }
 }
