@@ -1,76 +1,74 @@
-// Powered by OnSpace.AI
 import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { View, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import { Text, TextInput, Button, Card, Surface, useTheme } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, TextInput, Button, Card } from 'react-native-paper';
-import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { useAuth } from '../../contexts/AuthContext';
 
-export default function AdminLoginScreen() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export default function AdminLogin() {
+  const [email, setEmail] = useState('admin@vms.com');
+  const [password, setPassword] = useState('Admin@123');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const theme = useTheme();
+  const { login, user } = useAuth();
+
+  React.useEffect(() => {
+    if (user && user.roles.includes('Admin')) {
+      router.replace('/(admin)');
+    }
+  }, [user]);
 
   const handleLogin = async () => {
-    if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please enter both email and password');
       return;
     }
 
     setLoading(true);
-    
-    // Simulate login process
-    setTimeout(() => {
-      setLoading(false);
-      // For demo purposes, accept any email/password
-      if (email && password) {
+    try {
+      await login(email, password);
+
+      // Check if user has admin role
+      const currentUser = user;
+      if (currentUser && currentUser.roles.includes('Admin')) {
         router.replace('/(admin)');
       } else {
-        Alert.alert('Error', 'Invalid credentials');
+        Alert.alert('Error', 'Access denied. Admin privileges required.');
       }
-    }, 1500);
-  };
-
-  const handleBack = () => {
-    router.back();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Login failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <KeyboardAvoidingView 
-        style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+        style={styles.keyboardView}
       >
-        <View style={styles.content}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.header}>
-            <Button 
-              mode="text" 
-              onPress={handleBack}
-              contentStyle={styles.backButton}
-            >
-              <MaterialIcons name="arrow-back" size={24} color="#1976D2" />
-            </Button>
-            
-            <MaterialIcons name="admin-panel-settings" size={60} color="#1976D2" />
-            <Text variant="headlineMedium" style={styles.title}>
-              Admin Login
+            <Text variant="headlineLarge" style={[styles.title, { color: theme.colors.primary }]}>
+              VMS Admin
             </Text>
             <Text variant="bodyLarge" style={styles.subtitle}>
-              Access the administrative portal
+              Sign in to admin dashboard
             </Text>
           </View>
 
-          <Card style={styles.loginCard}>
+          <Card style={styles.card}>
             <Card.Content style={styles.cardContent}>
               <TextInput
-                label="Email Address"
+                label="Email"
                 value={email}
                 onChangeText={setEmail}
                 mode="outlined"
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoComplete="email"
                 style={styles.input}
                 left={<TextInput.Icon icon="email" />}
               />
@@ -81,11 +79,12 @@ export default function AdminLoginScreen() {
                 onChangeText={setPassword}
                 mode="outlined"
                 secureTextEntry={!showPassword}
+                autoComplete="password"
                 style={styles.input}
                 left={<TextInput.Icon icon="lock" />}
                 right={
                   <TextInput.Icon 
-                    icon={showPassword ? 'eye-off' : 'eye'} 
+                    icon={showPassword ? "eye-off" : "eye"} 
                     onPress={() => setShowPassword(!showPassword)}
                   />
                 }
@@ -99,62 +98,29 @@ export default function AdminLoginScreen() {
                 style={styles.loginButton}
                 contentStyle={styles.buttonContent}
               >
-                {loading ? 'Signing In...' : 'Sign In'}
+                {loading ? 'Signing in...' : 'Sign In'}
+              </Button>
+
+              <Button
+                mode="text"
+                onPress={() => router.push('/(auth)/driver-login')}
+                style={styles.switchButton}
+              >
+                Switch to Driver Login
               </Button>
             </Card.Content>
           </Card>
-        </View>
+
+          <Surface style={styles.footer} elevation={0}>
+            <Text variant="bodySmall" style={styles.footerText}>
+              Vehicle Management System v1.0
+            </Text>
+            <Text variant="bodySmall" style={styles.footerText}>
+              Default Admin: admin@vms.com / Admin@123
+            </Text>
+          </Surface>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    padding: 24,
-  },
-  header: {
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 20,
-  },
-  title: {
-    marginTop: 16,
-    fontWeight: 'bold',
-    color: '#1976D2',
-  },
-  subtitle: {
-    marginTop: 8,
-    textAlign: 'center',
-    color: '#666',
-  },
-  loginCard: {
-    elevation: 4,
-    borderRadius: 12,
-  },
-  cardContent: {
-    padding: 24,
-  },
-  input: {
-    marginBottom: 16,
-  },
-  loginButton: {
-    marginTop: 16,
-    borderRadius: 8,
-  },
-  buttonContent: {
-    paddingVertical: 8,
-  },
-});

@@ -1,28 +1,18 @@
-// Powered by OnSpace.AI
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { PaperProvider, MD3LightTheme } from 'react-native-paper';
-import { StatusBar } from 'expo-status-bar';
+import 'react-native-reanimated/lib/reanimated2/js-reanimated';
+import { PaperProvider } from 'react-native-paper';
+import { AuthProvider } from '../contexts/AuthContext';
+
+import { useColorScheme } from '@/hooks/useColorScheme';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-const theme = {
-  ...MD3LightTheme,
-  colors: {
-    ...MD3LightTheme.colors,
-    primary: '#1976D2',
-    secondary: '#FF9800',
-    tertiary: '#4CAF50',
-    surface: '#FFFFFF',
-    background: '#F5F5F5',
-  },
-};
-
 export default function RootLayout() {
+  const colorScheme = useColorScheme();
   const [loaded] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
@@ -38,16 +28,16 @@ export default function RootLayout() {
   }
 
   return (
-    <SafeAreaProvider>
-      <PaperProvider theme={theme}>
-        <StatusBar style="auto" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(admin)" />
-          <Stack.Screen name="(driver)" />
+    <PaperProvider>
+      <AuthProvider>
+        <Stack>
+          <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+          <Stack.Screen name="(admin)" options={{ headerShown: false }} />
+          <Stack.Screen name="(driver)" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="+not-found" />
         </Stack>
-      </PaperProvider>
-    </SafeAreaProvider>
+      </AuthProvider>
+    </PaperProvider>
   );
 }

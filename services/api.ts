@@ -1,204 +1,271 @@
 // Powered by OnSpace.AI
 import { ApiResponse, PaginatedResponse } from '../types';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.varshini-fleet.com';
+const API_BASE_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:5000/api' 
+  : 'https://your-repl-name.replit.app/api';
 
-class ApiClient {
+class ApiService {
   private baseURL: string;
-  private defaultHeaders: Record<string, string>;
+  private token: string | null = null;
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
-    this.defaultHeaders = {
+  constructor() {
+    this.baseURL = API_BASE_URL;
+  }
+
+  setToken(token: string) {
+    this.token = token;
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseURL}${endpoint}`;
+
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Accept': 'application/json',
+      ...options.headers,
     };
-  }
 
-  private getAuthToken(): string | null {
-    // In a real app, this would retrieve the token from secure storage
-    return null; // Placeholder for auth token
-  }
-
-  private getHeaders(): Record<string, string> {
-    const headers = { ...this.defaultHeaders };
-    const token = this.getAuthToken();
-    
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
     }
-    
-    return headers;
-  }
 
-  private async handleResponse<T>(response: Response): Promise<ApiResponse<T>> {
-    try {
-      const data = await response.json();
-      
-      if (!response.ok) {
-        return {
-          success: false,
-          message: data.message || 'An error occurred',
-          error: data.error || `HTTP ${response.status}`,
-        };
-      }
-      
-      return {
-        success: true,
-        data: data.data || data,
-        message: data.message || 'Success',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Failed to parse response',
-        error: error instanceof Error ? error.message : 'Unknown error',
-      };
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Network error' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
     }
+
+    return response.json();
   }
 
-  async get<T>(endpoint: string, params?: Record<string, any>): Promise<ApiResponse<T>> {
-    try {
-      const url = new URL(`${this.baseURL}${endpoint}`);
-      
-      if (params) {
-        Object.keys(params).forEach(key => {
-          if (params[key] !== undefined && params[key] !== null) {
-            url.searchParams.append(key, String(params[key]));
-          }
-        });
-      }
+  // Auth endpoints
+  async login(email: string, password: string) {
+    return this.request<AuthResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+  }
 
-      const response = await fetch(url.toString(), {
-        method: 'GET',
-        headers: this.getHeaders(),
+  async register(userData: RegisterRequest) {
+    return this.request<AuthResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async refreshToken(accessToken: string, refreshToken: string) {
+    return this.request<AuthResponse>('/auth/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ accessToken, refreshToken }),
+    });
+  }
+
+  async getCurrentUser() {
+    return this.request<UserInfo>('/auth/me');
+  }
+
+  // Vehicle endpoints
+  async getVehicles(searchParams?: VehicleSearchRequest) {
+    const params = new URLSearchParams();
+    if (searchParams) {
+      Object.entries(searchParams).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          params.append(key, value.toString());
+        }
       });
-
-      return this.handleResponse<T>(response);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Network error',
-        error: error instanceof Error ? error.message : 'Unknown network error',
-      };
     }
+    return this.request<VehicleResponse[]>(`/vehicles?${params}`);
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: data ? JSON.stringify(data) : undefined,
-      });
-
-      return this.handleResponse<T>(response);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Network error',
-        error: error instanceof Error ? error.message : 'Unknown network error',
-      };
-    }
+  async getVehicle(id: number) {
+    return this.request<VehicleResponse>(`/vehicles/${id}`);
   }
 
-  async put<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'PUT',
-        headers: this.getHeaders(),
-        body: data ? JSON.stringify(data) : undefined,
-      });
-
-      return this.handleResponse<T>(response);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Network error',
-        error: error instanceof Error ? error.message : 'Unknown network error',
-      };
-    }
+  async createVehicle(vehicleData: VehicleRequest) {
+    return this.request<VehicleResponse>('/vehicles', {
+      method: 'POST',
+      body: JSON.stringify(vehicleData),
+    });
   }
 
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    try {
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(),
-      });
-
-      return this.handleResponse<T>(response);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Network error',
-        error: error instanceof Error ? error.message : 'Unknown network error',
-      };
-    }
+  async updateVehicle(id: number, vehicleData: VehicleRequest) {
+    return this.request<VehicleResponse>(`/vehicles/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(vehicleData),
+    });
   }
 
-  async uploadFile<T>(endpoint: string, file: FormData): Promise<ApiResponse<T>> {
-    try {
-      const headers = { ...this.getHeaders() };
-      delete headers['Content-Type']; // Let fetch set the boundary for FormData
+  async deleteVehicle(id: number) {
+    return this.request<void>(`/vehicles/${id}`, { method: 'DELETE' });
+  }
 
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'POST',
-        headers,
-        body: file,
-      });
+  // Dashboard endpoints
+  async getDashboardStats() {
+    return this.request<DashboardStatsResponse>('/dashboard/stats');
+  }
 
-      return this.handleResponse<T>(response);
-    } catch (error) {
-      return {
-        success: false,
-        message: 'File upload failed',
-        error: error instanceof Error ? error.message : 'Unknown upload error',
-      };
-    }
+  // Maintenance endpoints
+  async getMaintenanceRecords(vehicleId: number) {
+    return this.request<MaintenanceRecordResponse[]>(`/maintenance/vehicle/${vehicleId}`);
+  }
+
+  async createMaintenanceRecord(data: MaintenanceRecordRequest) {
+    return this.request<MaintenanceRecordResponse>('/maintenance', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Fuel endpoints
+  async getFuelRecords(vehicleId: number) {
+    return this.request<FuelRecordResponse[]>(`/fuel/vehicle/${vehicleId}`);
+  }
+
+  async createFuelRecord(data: FuelRecordRequest) {
+    return this.request<FuelRecordResponse>('/fuel', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   }
 }
 
-export const apiClient = new ApiClient(API_BASE_URL);
+export const apiService = new ApiService();
 
-// Helper function for paginated requests
-export async function getPaginatedData<T>(
-  endpoint: string,
-  page: number = 1,
-  limit: number = 10,
-  filters?: Record<string, any>
-): Promise<PaginatedResponse<T>> {
-  const params = {
-    page,
-    limit,
-    ...filters,
-  };
-
-  const response = await apiClient.get<T[]>(endpoint, params);
-  
-  if (!response.success) {
-    return {
-      ...response,
-      pagination: {
-        page: 1,
-        limit: 10,
-        total: 0,
-        totalPages: 0,
-      },
-    };
-  }
-
-  // Assuming the API returns pagination info in headers or response body
-  // This is a placeholder - adjust based on actual API response structure
-  return {
-    ...response,
-    pagination: {
-      page,
-      limit,
-      total: 0, // Should come from API response
-      totalPages: 0, // Should come from API response
-    },
-  };
+// Types
+export interface AuthResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: string;
+  user: UserInfo;
 }
 
-export default apiClient;
+export interface UserInfo {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  roles: string[];
+}
+
+export interface RegisterRequest {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber?: string;
+}
+
+export interface VehicleRequest {
+  vin: string;
+  make: string;
+  model: string;
+  year: number;
+  color: string;
+  licensePlate: string;
+  mileage: number;
+  status: string;
+  ownerId?: string;
+}
+
+export interface VehicleResponse {
+  id: number;
+  vin: string;
+  make: string;
+  model: string;
+  year: number;
+  color: string;
+  licensePlate: string;
+  mileage: number;
+  status: string;
+  ownerId?: string;
+  ownerName?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VehicleSearchRequest {
+  make?: string;
+  model?: string;
+  year?: number;
+  status?: string;
+  searchTerm?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface DashboardStatsResponse {
+  totalVehicles: number;
+  activeVehicles: number;
+  vehiclesInMaintenance: number;
+  overdueMaintenanceCount: number;
+  monthlyFuelCost: number;
+  monthlyMaintenanceCost: number;
+  averageVehicleAge: number;
+  vehiclesByStatus: Array<{ status: string; count: number }>;
+  monthlyExpenses: Array<{ month: string; fuelCost: number; maintenanceCost: number }>;
+}
+
+export interface MaintenanceRecordRequest {
+  vehicleId: number;
+  type: string;
+  description: string;
+  cost: number;
+  serviceProvider: string;
+  serviceDate: string;
+  nextServiceDue?: string;
+  parts?: string;
+  status: string;
+  receiptImagePath?: string;
+}
+
+export interface MaintenanceRecordResponse {
+  id: number;
+  vehicleId: number;
+  vehicleInfo: string;
+  type: string;
+  description: string;
+  cost: number;
+  serviceProvider: string;
+  serviceDate: string;
+  nextServiceDue?: string;
+  parts?: string;
+  status: string;
+  receiptImagePath?: string;
+  performedById?: string;
+  performedByName?: string;
+  createdAt: string;
+}
+
+export interface FuelRecordRequest {
+  vehicleId: number;
+  fuelAmount: number;
+  cost: number;
+  pricePerUnit: number;
+  odometerReading: number;
+  fuelStation: string;
+  fuelDate: string;
+  receiptImagePath?: string;
+}
+
+export interface FuelRecordResponse {
+  id: number;
+  vehicleId: number;
+  vehicleInfo: string;
+  fuelAmount: number;
+  cost: number;
+  pricePerUnit: number;
+  odometerReading: number;
+  fuelEfficiency?: number;
+  fuelStation: string;
+  fuelDate: string;
+  receiptImagePath?: string;
+  recordedById?: string;
+  recordedByName?: string;
+  createdAt: string;
+}
+
+export default apiService;
