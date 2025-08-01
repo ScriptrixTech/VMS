@@ -1,4 +1,5 @@
-modules = ["nodejs-20"]
+
+modules = ["nodejs-20", "dotnet-8.0"]
 run = "npm run start"
 
 [nix]
@@ -17,12 +18,16 @@ mode = "parallel"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 8.0 && export PATH=\"$HOME/.dotnet:$PATH\" && cd VMS.Backend && dotnet run"
+args = "cd VMS.Backend && dotnet restore && dotnet run"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm run start"
+args = "npm install && npm run start"
 
 [[ports]]
 localPort = 8081
 externalPort = 80
+
+[[ports]]
+localPort = 5000
+externalPort = 3000

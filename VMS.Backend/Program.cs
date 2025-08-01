@@ -1,3 +1,4 @@
+
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -9,13 +10,17 @@ using VMS.Backend.Models;
 using VMS.Backend.Services;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Threading.RateLimiting;
+using System.Globalization;
+
+// Set globalization to invariant to avoid ICU issues
+Environment.SetEnvironmentVariable("DOTNET_SYSTEM_GLOBALIZATION_INVARIANT", "1");
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container
-// Configure Entity Framework with SQL Server
+// Configure Entity Framework with SQLite
 builder.Services.AddDbContext<VMSDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
 {
