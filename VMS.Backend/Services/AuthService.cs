@@ -1,5 +1,5 @@
-
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -28,7 +28,16 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponse> LoginAsync(LoginRequest request)
     {
+        // Support both email and phone number login
         var user = await _userManager.FindByEmailAsync(request.Email);
+
+        // If not found by email, try to find by phone number (formatted as email)
+        if (user == null && request.Email.Contains("@phone.vms.com"))
+        {
+            var phoneNumber = request.Email.Replace("@phone.vms.com", "");
+            user = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == phoneNumber);
+        }
+
         if (user == null || !user.IsActive)
         {
             throw new UnauthorizedAccessException("Invalid credentials");

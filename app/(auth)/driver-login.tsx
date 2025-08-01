@@ -1,116 +1,151 @@
-// Powered by OnSpace.AI
-import React, { useState } from 'react';
-import { View, StyleSheet, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, Alert, Platform } from 'react-native';
+import { Text, TextInput, Button, Card, ActivityIndicator } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Text, TextInput, Button, Card } from 'react-native-paper';
-import { MaterialIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as LocalAuthentication from 'expo-local-authentication';
+import PhoneInput from 'react-native-phone-number-input';
+import { parsePhoneNumber, isValidPhoneNumber } from 'libphonenumber-js';
+import { useAuth } from '../../contexts/AuthContext';
 
-export default function DriverLoginScreen() {
-  const [mobile, setMobile] = useState('');
+export default function DriverLogin() {
+  const { login, isLoading } = useAuth();
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [formattedValue, setFormattedValue] = useState('');
+  const [isBiometricSupported, setIsBiometricSupported] = useState(false);
+  const [savedCredentials, setSavedCredentials] = useState(false);
+  
+  useEffect(() => {
+    checkBiometricSupport();
+    checkSavedCredentials();
+  }, []);
 
-  const handleLogin = async () => {
-    if (!mobile || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-
-    if (mobile.length !== 10) {
-      Alert.alert('Error', 'Please enter a valid 10-digit mobile number');
-      return;
-    }
-
-    setLoading(true);
-    
-    // Simulate login process
-    setTimeout(() => {
-      setLoading(false);
-      // For demo purposes, accept any mobile/password
-      if (mobile && password) {
-        router.replace('/(driver)');
-      } else {
-        Alert.alert('Error', 'Invalid credentials');
-      }
-    }, 1500);
+  const checkBiometricSupport = async () => {
+    const compatible = await LocalAuthentication.hasHardwareAsync();
+    const enrolled = await LocalAuthentication.isEnrolledAsync();
+    setIsBiometricSupported(compatible && enrolled);
   };
 
-  const handleBack = () => {
-    router.back();
+  const checkSavedCredentials = async () => {
+    // Check if user has saved credentials for biometric login
+    // This would typically check AsyncStorage or secure storage
+    setSavedCredentials(true); // Placeholder
+  };
+
+  const handleBiometricLogin = async () => {
+    try {
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Login with biometrics',
+        cancelLabel: 'Cancel',
+        fallbackLabel: 'Use password',
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        // Use saved credentials for automatic login
+        const savedPhone = '+919876543210'; // This would come from secure storage
+        const savedPassword = 'password123'; // This would be encrypted/hashed
+        await login(savedPhone, savedPassword);
+        router.replace('/(driver)');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Biometric authentication failed');
+    }
+  };
+
+  const handleLogin = async () => {
+    if (!phoneNumber || !password) {
+      Alert.alert('Error', 'Please enter both phone number and password');
+      return;
+    }
+
+    if (!isValidPhoneNumber(phoneNumber)) {
+      Alert.alert('Error', 'Please enter a valid phone number');
+      return;
+    }
+
+    try {
+      // Convert phone number to email format for backend compatibility
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      const emailFormat = `${cleanPhone}@phone.vms.com`;
+      
+      await login(emailFormat, password);
+      router.replace('/(driver)');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Login failed');
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView 
-        style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
-      >
-        <View style={styles.content}>
-          <View style={styles.header}>
-            <Button 
-              mode="text" 
-              onPress={handleBack}
-              contentStyle={styles.backButton}
-            >
-              <MaterialIcons name="arrow-back" size={24} color="#FF9800" />
-            </Button>
-            
-            <MaterialIcons name="person" size={60} color="#FF9800" />
+      <View style={styles.content}>
+        <Card style={styles.card}>
+          <Card.Content style={styles.cardContent}>
             <Text variant="headlineMedium" style={styles.title}>
               Driver Login
             </Text>
             <Text variant="bodyLarge" style={styles.subtitle}>
-              Access your driver portal
+              Sign in to access your dashboard
             </Text>
-          </View>
 
-          <Card style={styles.loginCard}>
-            <Card.Content style={styles.cardContent}>
-              <TextInput
-                label="Mobile Number"
-                value={mobile}
-                onChangeText={setMobile}
-                mode="outlined"
-                keyboardType="numeric"
-                maxLength={10}
-                style={styles.input}
-                left={<TextInput.Icon icon="phone" />}
-              />
+            <PhoneInput
+              defaultCode="IN"
+              layout="first"
+              onChangeText={setPhoneNumber}
+              onChangeFormattedText={setFormattedValue}
+              placeholder="Enter phone number"
+              containerStyle={styles.phoneContainer}
+              textContainerStyle={styles.phoneTextContainer}
+              textInputStyle={styles.phoneInput}
+            />
 
-              <TextInput
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                mode="outlined"
-                secureTextEntry={!showPassword}
-                style={styles.input}
-                left={<TextInput.Icon icon="lock" />}
-                right={
-                  <TextInput.Icon 
-                    icon={showPassword ? 'eye-off' : 'eye'} 
-                    onPress={() => setShowPassword(!showPassword)}
-                  />
-                }
-              />
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              style={styles.input}
+              mode="outlined"
+            />
 
-              <Button
-                mode="contained"
-                onPress={handleLogin}
-                loading={loading}
-                disabled={loading}
-                style={styles.loginButton}
-                contentStyle={styles.buttonContent}
-                buttonColor="#FF9800"
-              >
-                {loading ? 'Signing In...' : 'Sign In'}
-              </Button>
-            </Card.Content>
-          </Card>
-        </View>
-      </KeyboardAvoidingView>
+            <Button
+              mode="contained"
+              onPress={handleLogin}
+              loading={isLoading}
+              disabled={isLoading}
+              style={styles.loginButton}
+            >
+              Login
+            </Button>
+
+            {isBiometricSupported && savedCredentials && (
+              <View style={styles.biometricSection}>
+                <Text variant="bodyMedium" style={styles.orText}>
+                  or
+                </Text>
+                <Button
+                  mode="outlined"
+                  onPress={handleBiometricLogin}
+                  icon="fingerprint"
+                  style={styles.biometricButton}
+                >
+                  Login with Biometrics
+                </Button>
+              </View>
+            )}
+
+            <Button
+              mode="text"
+              onPress={() => router.push('/(auth)/admin-login')}
+              style={styles.switchButton}
+            >
+              Login as Admin
+            </Button>
+          </Card.Content>
+        </Card>
+      </View>
     </SafeAreaView>
   );
 }
@@ -118,49 +153,65 @@ export default function DriverLoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  keyboardView: {
-    flex: 1,
+    backgroundColor: '#f5f5f5',
   },
   content: {
     flex: 1,
-    padding: 24,
+    justifyContent: 'center',
+    padding: 20,
   },
-  header: {
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    marginBottom: 20,
-  },
-  title: {
-    marginTop: 16,
-    fontWeight: 'bold',
-    color: '#FF9800',
-  },
-  subtitle: {
-    marginTop: 8,
-    textAlign: 'center',
-    color: '#666',
-  },
-  loginCard: {
+  card: {
     elevation: 4,
     borderRadius: 12,
   },
   cardContent: {
     padding: 24,
   },
+  title: {
+    textAlign: 'center',
+    marginBottom: 8,
+    fontWeight: 'bold',
+    color: '#1976D2',
+  },
+  subtitle: {
+    textAlign: 'center',
+    marginBottom: 32,
+    color: '#666',
+  },
+  phoneContainer: {
+    width: '100%',
+    marginBottom: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  phoneTextContainer: {
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  phoneInput: {
+    fontSize: 16,
+  },
   input: {
     marginBottom: 16,
   },
   loginButton: {
-    marginTop: 16,
-    borderRadius: 8,
-  },
-  buttonContent: {
+    marginBottom: 16,
     paddingVertical: 8,
+  },
+  biometricSection: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  orText: {
+    textAlign: 'center',
+    marginBottom: 16,
+    color: '#666',
+  },
+  biometricButton: {
+    marginBottom: 16,
+  },
+  switchButton: {
+    marginTop: 8,
   },
 });

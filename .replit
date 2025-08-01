@@ -17,7 +17,7 @@ mode = "parallel"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd VMS.Backend && dotnet run"
+args = "curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 8.0 && export PATH=\"$HOME/.dotnet:$PATH\" && cd VMS.Backend && dotnet run"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"

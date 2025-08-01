@@ -2,7 +2,6 @@ import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-// Reanimated import removed to fix build issues
 import { PaperProvider } from 'react-native-paper';
 import { AuthProvider } from '../contexts/AuthContext';
 
