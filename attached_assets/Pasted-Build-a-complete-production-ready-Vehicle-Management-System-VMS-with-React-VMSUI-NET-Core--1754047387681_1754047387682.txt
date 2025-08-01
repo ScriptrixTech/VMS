@@ -1,0 +1,113 @@
+Build a complete, production-ready Vehicle Management System (VMS) with React (VMSUI) + .NET Core + MS SQL, incorporating the following features and best practices:
+
+1. System Requirements
+Frontend: React (existing VMSUI) with responsive UI/UX.
+
+Backend: .NET Core Web API (RESTful, clean architecture).
+
+Database: MS SQL Server (optimized schema, indexes).
+
+Authentication: JWT with refresh tokens, role-based access (Admin, User).
+
+2. Core Features
+User Management:
+
+Secure registration/login (email + password recovery).
+
+Profile management (update details, change password).
+
+Admin panel for user role management.
+
+Vehicle Operations:
+
+Full CRUD for vehicles (VIN validation, owner assignment).
+
+Search/filter (by make, model, year, status).
+
+Maintenance Tracking:
+
+Service history (scheduled vs. ad-hoc, reminders).
+
+Image uploads for service receipts.
+
+Fuel Management:
+
+Mileage tracking, fuel efficiency calculations.
+
+Cost analysis (weekly/monthly/yearly reports).
+
+Dashboard & Reporting:
+
+Interactive charts (cost trends, fuel usage).
+
+Export data (PDF/CSV).
+
+3. Security & Performance
+API Protection:
+
+Rate limiting, CORS restrictions, HTTPS enforcement.
+
+JWT expiration (short-lived access tokens + refresh tokens).
+
+Data Safety:
+
+SQL parameterized queries (no injection risks).
+
+Sensitive data encryption (passwords, VINs).
+
+Optimizations:
+
+Caching for frequent queries (e.g., dashboard stats).
+
+Pagination for large datasets (vehicles/maintenance logs).
+
+4. Best Practices & Suggestions
+✅ Code Quality:
+
+Follow SOLID principles (backend) and modular React components.
+
+Meaningful comments + documentation (Swagger for API).
+✅ UI/UX Enhancements:
+
+Toast notifications for actions (success/error).
+
+Loading states for async operations.
+
+Dark/light mode toggle.
+✅ Deployment Prep:
+
+Dockerize for easy Replit/cloud deployment.
+
+Environment variables (DB strings, JWT secrets).
+✅ Testing:
+
+Unit tests (backend services).
+
+Postman collection for API verification.
+
+5. Replit-Specific Setup
+Configure .replit to run React + .NET concurrently.
+
+Use Replit Secrets for credentials (DB, JWT).
+
+Enable live collaboration if team development is needed.
+
+Deliverables:
+
+Fully functional VMS with all features.
+
+Secure, scalable, and well-documented codebase.
+
+Brief user manual (how to use key features).
+
+Test evidence (screenshots/scripts).
+
+Optional Stretch Goals:
+
+Mobile-friendly PWA version.
+
+OAuth (Google/GitHub login).
+
+Real-time alerts (email/SMS for maintenance due).
+
+Note: Prioritize security and usability—this should be a system you’d trust for real-world use.
